@@ -259,6 +259,28 @@ function TextOverlay() {
       const ext = getFileExtension(sanitized) || 'mp4'
       const baseName = sanitized.substring(0, sanitized.lastIndexOf('.')) || sanitized
 
+      // Get video duration first - needed for split-process-stitch approach
+      setStatus('Getting video duration...')
+      let videoDuration = null
+      try {
+        // Create a video element to get duration
+        const video = document.createElement('video')
+        video.preload = 'metadata'
+        video.src = URL.createObjectURL(file)
+        await new Promise((resolve, reject) => {
+          video.onloadedmetadata = () => {
+            videoDuration = video.duration
+            URL.revokeObjectURL(video.src)
+            resolve()
+          }
+          video.onerror = reject
+        })
+        console.log(`Video duration: ${videoDuration} seconds`)
+      } catch (durationErr) {
+        console.warn('Could not get video duration:', durationErr)
+        // Fall back to processing entire video if duration unavailable
+      }
+
       setStatus('Loading file into FFmpeg...')
       const fileData = await file.arrayBuffer()
       await ffmpeg.writeFile(sanitized, new Uint8Array(fileData))
@@ -317,16 +339,15 @@ function TextOverlay() {
         borderWidth: config.borderWidth ?? 3,
       }
 
-      // Build drawtext filters
-      // Note: Values scale proportionally with video height (h/1080) so text appears the same visual size on all resolutions
-      const fontPath = 'font.ttf' // Font file path in FFmpeg virtual filesystem
+      // Build drawtext filters for overlay
+      const fontPath = 'font.ttf'
       const filters = []
       if (songTitle.trim()) {
-        const titleFilter = buildDrawTextFilter(songTitle, scaledConfig.songTitle, true, 4, fontPath, null)
+        const titleFilter = buildDrawTextFilter(songTitle, scaledConfig.songTitle, true, 5, fontPath, null)
         if (titleFilter) filters.push(titleFilter)
       }
       if (artist.trim()) {
-        const artistFilter = buildDrawTextFilter(artist, scaledConfig.artist, false, 4, fontPath, null)
+        const artistFilter = buildDrawTextFilter(artist, scaledConfig.artist, false, 5, fontPath, null)
         if (artistFilter) filters.push(artistFilter)
       }
 
@@ -334,35 +355,146 @@ function TextOverlay() {
         throw new Error('No text to overlay')
       }
 
-      // Combine filters - use scale2ref or scale to ensure proper sizing
-      // For multiple text overlays, we need to chain them properly
-      const filterComplex = filters.length > 1 
-        ? filters.map((f, i) => i === 0 ? f : `[v${i}][${i}:v]overlay[v${i+1}]`).join(';') 
-        : filters[0]
-      
-      // Actually, for multiple drawtext filters, we can just comma-separate them
-      // FFmpeg will apply them sequentially
       const finalFilter = filters.join(',')
-      
-      // Debug: log the filter to console
-      console.log('FFmpeg filter:', finalFilter)
-
-      setProgress(30)
-      setStatus('Rendering video with text overlay...')
 
       const outputFilename = `${baseName}_with_text.${ext}`
+      const overlayDuration = 5 // seconds
 
-      // Run FFmpeg with drawtext filter
-      // Using lossless encoding: CRF 0 for lossless H.264, veryslow preset for best compression
-      // Audio is copied without re-encoding (already lossless)
-      try {
-        setProgress(40)
-        setStatus('Running FFmpeg... This may take several minutes for large files.')
+      // Use split-process-stitch approach for faster processing
+      if (videoDuration && videoDuration > overlayDuration * 2) {
+        // Split video into 3 segments, process only start and end
+        setProgress(20)
+        setStatus('Splitting video into segments...')
+
+        // Segment filenames
+        const startSegment = 'segment_start.mp4'
+        const middleSegment = 'segment_middle.mp4'
+        const endSegment = 'segment_end.mp4'
+        const startProcessed = 'segment_start_processed.mp4'
+        const endProcessed = 'segment_end_processed.mp4'
+
+        try {
+          // Extract start segment (0 to overlayDuration seconds)
+          setStatus('Extracting start segment...')
+          await ffmpeg.exec([
+            '-i', sanitized,
+            '-ss', '0',
+            '-t', overlayDuration.toString(),
+            '-c', 'copy', // Copy codec for speed
+            startSegment
+          ])
+
+          // Extract end segment (last overlayDuration seconds)
+          const endStartTime = (videoDuration - overlayDuration).toFixed(3)
+          setStatus('Extracting end segment...')
+          await ffmpeg.exec([
+            '-i', sanitized,
+            '-ss', endStartTime,
+            '-c', 'copy',
+            endSegment
+          ])
+
+          // Extract middle segment (overlayDuration to endStartTime)
+          const middleDuration = (videoDuration - overlayDuration * 2).toFixed(3)
+          setStatus('Extracting middle segment...')
+          await ffmpeg.exec([
+            '-i', sanitized,
+            '-ss', overlayDuration.toString(),
+            '-t', middleDuration,
+            '-c', 'copy',
+            middleSegment
+          ])
+
+          setProgress(30)
+
+          // Process start segment with overlay
+          setStatus('Processing start segment with overlay...')
+          ffmpeg.on('progress', ({ progress }) => {
+            if (progress >= 0 && progress <= 1) {
+              const progressPercent = Math.round(30 + (progress * 20)) // 30-50%
+              setProgress(progressPercent)
+            }
+          })
+
+          await ffmpeg.exec([
+            '-i', startSegment,
+            '-vf', finalFilter,
+            '-c:a', 'copy',
+            '-c:v', 'libx264',
+            '-preset', 'veryslow',
+            '-crf', '0',
+            '-pix_fmt', 'yuv420p',
+            startProcessed
+          ])
+
+          ffmpeg.off('progress')
+
+          setProgress(50)
+
+          // Process end segment with overlay
+          setStatus('Processing end segment with overlay...')
+          ffmpeg.on('progress', ({ progress }) => {
+            if (progress >= 0 && progress <= 1) {
+              const progressPercent = Math.round(50 + (progress * 20)) // 50-70%
+              setProgress(progressPercent)
+            }
+          })
+
+          await ffmpeg.exec([
+            '-i', endSegment,
+            '-vf', finalFilter,
+            '-c:a', 'copy',
+            '-c:v', 'libx264',
+            '-preset', 'veryslow',
+            '-crf', '0',
+            '-pix_fmt', 'yuv420p',
+            endProcessed
+          ])
+
+          ffmpeg.off('progress')
+
+          setProgress(70)
+          setStatus('Concatenating segments...')
+
+          // Concatenate all three segments using concat filter
+          // All segments must start at timestamp 0 and have compatible codecs
+          await ffmpeg.exec([
+            '-i', startProcessed,
+            '-i', middleSegment,
+            '-i', endProcessed,
+            '-filter_complex', '[0:v][0:a][1:v][1:a][2:v][2:a]concat=n=3:v=1:a=1[outv][outa]',
+            '-map', '[outv]',
+            '-map', '[outa]',
+            '-c:v', 'libx264',
+            '-preset', 'veryslow',
+            '-crf', '0',
+            '-c:a', 'copy',
+            '-pix_fmt', 'yuv420p',
+            outputFilename
+          ])
+
+          setProgress(90)
+
+          // Clean up segment files
+          await ffmpeg.deleteFile(startSegment).catch(() => {})
+          await ffmpeg.deleteFile(middleSegment).catch(() => {})
+          await ffmpeg.deleteFile(endSegment).catch(() => {})
+          await ffmpeg.deleteFile(startProcessed).catch(() => {})
+          await ffmpeg.deleteFile(endProcessed).catch(() => {})
+
+        } catch (segmentErr) {
+          const errorMsg = segmentErr?.message || segmentErr?.toString() || String(segmentErr) || 'Segment processing failed'
+          console.error('Segment processing error:', segmentErr)
+          throw new Error(`Split-process-stitch failed: ${errorMsg}`)
+        }
+      } else {
+        // Fallback: process entire video if duration unavailable or video too short
+        setProgress(30)
+        setStatus('Processing entire video (duration unavailable or video too short)...')
         
-        // Add progress callback
         ffmpeg.on('progress', ({ progress }) => {
           if (progress >= 0 && progress <= 1) {
-            const progressPercent = Math.round(40 + (progress * 50)) // 40-90%
+            const progressPercent = Math.round(30 + (progress * 60)) // 30-90%
             setProgress(progressPercent)
           }
         })
@@ -370,20 +502,16 @@ function TextOverlay() {
         await ffmpeg.exec([
           '-i', sanitized,
           '-vf', finalFilter,
-          '-c:a', 'copy', // Copy audio without re-encoding (lossless)
-          '-c:v', 'libx264', // Lossless H.264 encoding
-          '-preset', 'veryslow', // Best compression efficiency (slower but smaller file)
-          '-crf', '0', // Lossless quality (0 = lossless)
-          '-pix_fmt', 'yuv420p', // Ensure compatibility
+          '-c:a', 'copy',
+          '-c:v', 'libx264',
+          '-preset', 'veryslow',
+          '-crf', '0',
+          '-pix_fmt', 'yuv420p',
           outputFilename
         ])
 
-        // Remove progress callback
         ffmpeg.off('progress')
-      } catch (execErr) {
-        const execErrorMessage = execErr?.message || execErr?.toString() || String(execErr) || 'FFmpeg execution failed'
-        console.error('FFmpeg error details:', execErr)
-        throw new Error(`FFmpeg processing failed: ${execErrorMessage}`)
+        setProgress(90)
       }
 
       setProgress(90)
