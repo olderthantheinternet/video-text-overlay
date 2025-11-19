@@ -25,11 +25,22 @@ export function useFFmpeg() {
       })
 
       // Load FFmpeg with CDN URLs
-      const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm'
-      await ffmpegInstance.load({
-        coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
-        wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
-      })
+      // Try jsdelivr as primary CDN (more reliable), fallback to unpkg
+      const baseURL = 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/esm'
+      try {
+        await ffmpegInstance.load({
+          coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
+          wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
+        })
+      } catch (cdnError) {
+        console.warn('Primary CDN failed, trying fallback...', cdnError)
+        // Fallback to unpkg
+        const fallbackURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm'
+        await ffmpegInstance.load({
+          coreURL: await toBlobURL(`${fallbackURL}/ffmpeg-core.js`, 'text/javascript'),
+          wasmURL: await toBlobURL(`${fallbackURL}/ffmpeg-core.wasm`, 'application/wasm'),
+        })
+      }
 
       setFFmpeg(ffmpegInstance)
       setIsLoaded(true)
