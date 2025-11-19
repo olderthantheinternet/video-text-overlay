@@ -176,20 +176,20 @@ function TextOverlay() {
     
     const escapedText = escapeText(text)
     
-    // X position: scale proportionally from 1080p base
-    // For 1080p: use config.x directly
-    // For other resolutions: scale by h/1080
+    // X position: scale proportionally with video height
+    // This ensures text appears the same visual size on all video resolutions
+    // Presets are designed for 1080p, so we scale by h/1080
     const x = config.x
     const xExpr = `(${x}*h/1080)`
     
-    // Y position from bottom: use expression that scales with video height
+    // Y position from bottom: scale proportionally with video height
     // h = video height, th = text height
-    // Position from bottom: h - th - offset
-    // Scale offset proportionally: config.y * h/1080
+    // Position from bottom: h - th - offset (scaled proportionally)
     const yOffset = config.y
     const yExpr = `h-th-(${yOffset}*h/1080)`
     
-    // Font size: scale proportionally
+    // Font size: scale proportionally with video height
+    // This ensures the text takes up the same percentage of screen height on all resolutions
     const fontSizeExpr = `(${config.fontSize}*h/1080)`
     
     const fontColor = getColorValue(config.color)
@@ -210,15 +210,16 @@ function TextOverlay() {
     let filter = `drawtext=text='${escapedText}':fontsize=${fontSizeExpr}:x=${xExpr}:y=${yExpr}:fontcolor=${fontColor}@1.0:enable='${escapedEnableExpr}'`
     
     // Add border for visibility
-    if (borderWidth > 0) {
-      const borderWidthExpr = `(${borderWidth}*h/1080)`
-      filter += `:borderw=${borderWidthExpr}:bordercolor=${borderColor}@0.8`
+    // Determine border width: use config borderWidth if > 0, or 2 for bold text if borderWidth is 0
+    let actualBorderWidth = borderWidth
+    if (config.fontWeight === 'bold' && borderWidth === 0) {
+      actualBorderWidth = 2
     }
     
-    // For bold effect, we increase border width slightly
-    if (config.fontWeight === 'bold' && borderWidth === 0) {
-      const boldBorderWidth = `(2*h/1080)`
-      filter += `:borderw=${boldBorderWidth}:bordercolor=${borderColor}@0.8`
+    if (actualBorderWidth > 0) {
+      // Border width: scale proportionally with video height
+      const borderWidthExpr = `(${actualBorderWidth}*h/1080)`
+      filter += `:borderw=${borderWidthExpr}:bordercolor=${borderColor}@0.8`
     }
     
     return filter
@@ -266,18 +267,20 @@ function TextOverlay() {
         throw new Error('Invalid configuration. Please select a preset or configure custom settings.')
       }
       
-      // Use config as-is - FFmpeg expressions will handle scaling automatically
-      // The positions are designed for 1080p but will scale proportionally
+      // Use config with proportional scaling - values scale with video height
+      // This ensures text appears the same visual size on all video resolutions
+      // Presets are designed for 1080p and scale proportionally for other resolutions
       const scaledConfig = {
         songTitle: {
           ...config.songTitle,
-          // Scale x position proportionally (assuming 1080p base)
+          // Values will be scaled proportionally by h/1080 in the filter
           x: config.songTitle?.x ?? 150,
           y: config.songTitle?.y ?? 250,
           fontSize: config.songTitle?.fontSize ?? 70,
         },
         artist: {
           ...config.artist,
+          // Values will be scaled proportionally by h/1080 in the filter
           x: config.artist?.x ?? 150,
           y: config.artist?.y ?? 200,
           fontSize: config.artist?.fontSize ?? 45,
@@ -288,7 +291,7 @@ function TextOverlay() {
       }
 
       // Build drawtext filters
-      // Note: We'll use FFmpeg expressions that work with any video resolution
+      // Note: Values scale proportionally with video height (h/1080) so text appears the same visual size on all resolutions
       const filters = []
       if (songTitle.trim()) {
         const titleFilter = buildDrawTextFilter(songTitle, scaledConfig.songTitle, true)
