@@ -171,7 +171,7 @@ function TextOverlay() {
   }
 
   // Build FFmpeg drawtext filter
-  const buildDrawTextFilter = (text, config, isTitle) => {
+  const buildDrawTextFilter = (text, config, isTitle, overlayDuration = 4) => {
     if (!text) return ''
     
     const escapedText = escapeText(text)
@@ -197,7 +197,13 @@ function TextOverlay() {
     const borderWidth = config.borderWidth || 0
     
     // Build drawtext filter with expressions
-    let filter = `drawtext=text='${escapedText}':fontsize=${fontSizeExpr}:x=${xExpr}:y=${yExpr}:fontcolor=${fontColor}@1.0`
+    // Enable overlay only at start (0 to overlayDuration seconds) and end (duration-overlayDuration to duration)
+    // This shows the overlay for the first few seconds and last few seconds of the video
+    // FFmpeg expression: show when t is between 0 and overlayDuration OR between (duration-overlayDuration) and duration
+    // For very short videos (less than 2*overlayDuration), show for the entire duration
+    const enableExpr = `if(lt(duration,${overlayDuration * 2}),1,between(t,0,${overlayDuration})+between(t,duration-${overlayDuration},duration))`
+    
+    let filter = `drawtext=text='${escapedText}':fontsize=${fontSizeExpr}:x=${xExpr}:y=${yExpr}:fontcolor=${fontColor}@1.0:enable='${enableExpr}'`
     
     // Add border for visibility
     if (borderWidth > 0) {
@@ -308,14 +314,16 @@ function TextOverlay() {
       const outputFilename = `${baseName}_with_text.${ext}`
 
       // Run FFmpeg with drawtext filter
+      // Using lossless encoding: CRF 0 for lossless H.264, veryslow preset for best compression
+      // Audio is copied without re-encoding (already lossless)
       try {
         await ffmpeg.exec([
           '-i', sanitized,
           '-vf', finalFilter,
-          '-c:a', 'copy', // Copy audio without re-encoding
-          '-c:v', 'libx264', // Re-encode video with overlay
-          '-preset', 'medium',
-          '-crf', '23',
+          '-c:a', 'copy', // Copy audio without re-encoding (lossless)
+          '-c:v', 'libx264', // Lossless H.264 encoding
+          '-preset', 'veryslow', // Best compression efficiency (slower but smaller file)
+          '-crf', '0', // Lossless quality (0 = lossless)
           '-pix_fmt', 'yuv420p', // Ensure compatibility
           outputFilename
         ])
