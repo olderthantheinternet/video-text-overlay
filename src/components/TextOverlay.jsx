@@ -201,8 +201,8 @@ function TextOverlay() {
     // Enable overlay only at start (0 to overlayDuration seconds) and end (duration-overlayDuration to duration)
     // This shows the overlay for the first few seconds and last few seconds of the video
     // FFmpeg expression: show when t is between 0 and overlayDuration OR between (duration-overlayDuration) and duration
-    // Note: Using proper escaping - commas in expressions need to be escaped as \, in the filter string
-    const enableExpr = `between(t,0,${overlayDuration})+between(t,duration-${overlayDuration},duration)`
+    // Note: Arithmetic operations in function arguments need parentheses: (duration-4) not duration-4
+    const enableExpr = `between(t,0,${overlayDuration})+between(t,(duration-${overlayDuration}),duration)`
     
     // Escape the enable expression properly for FFmpeg filter syntax
     // In FFmpeg filter strings, we need to escape special characters
