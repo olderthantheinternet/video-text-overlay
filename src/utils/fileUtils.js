@@ -45,6 +45,9 @@ export function isSupportedVideoFile(file) {
   }
   
   // Fallback: check extension
+  if (!file.name || typeof file.name !== 'string') {
+    return false
+  }
   const ext = file.name.toLowerCase().split('.').pop()
   const supportedExts = ['mp4', 'mov', 'avi', 'webm']
   
@@ -57,6 +60,9 @@ export function isSupportedVideoFile(file) {
  * @returns {string} - Extension (without dot)
  */
 export function getFileExtension(filename) {
+  if (!filename || typeof filename !== 'string') {
+    return ''
+  }
   const parts = filename.split('.')
   return parts.length > 1 ? parts[parts.length - 1].toLowerCase() : ''
 }

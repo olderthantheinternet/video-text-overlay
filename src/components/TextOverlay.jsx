@@ -156,6 +156,9 @@ function TextOverlay() {
 
   // Convert color name to hex/rgb for FFmpeg
   const getColorValue = (color) => {
+    if (!color || typeof color !== 'string') {
+      return 'white' // default color
+    }
     const colors = {
       white: 'white',
       black: 'black',
@@ -248,25 +251,29 @@ function TextOverlay() {
       // Get current config (preset or custom)
       const config = preset === 'custom' ? customConfig : PRESETS[preset]
       
+      if (!config) {
+        throw new Error('Invalid configuration. Please select a preset or configure custom settings.')
+      }
+      
       // Use config as-is - FFmpeg expressions will handle scaling automatically
       // The positions are designed for 1080p but will scale proportionally
       const scaledConfig = {
         songTitle: {
           ...config.songTitle,
           // Scale x position proportionally (assuming 1080p base)
-          x: config.songTitle.x,
-          y: config.songTitle.y,
-          fontSize: config.songTitle.fontSize,
+          x: config.songTitle?.x ?? 150,
+          y: config.songTitle?.y ?? 250,
+          fontSize: config.songTitle?.fontSize ?? 70,
         },
         artist: {
           ...config.artist,
-          x: config.artist.x,
-          y: config.artist.y,
-          fontSize: config.artist.fontSize,
+          x: config.artist?.x ?? 150,
+          y: config.artist?.y ?? 200,
+          fontSize: config.artist?.fontSize ?? 45,
         },
-        color: config.color,
-        borderColor: config.borderColor,
-        borderWidth: config.borderWidth,
+        color: config.color ?? 'white',
+        borderColor: config.borderColor ?? 'black',
+        borderWidth: config.borderWidth ?? 3,
       }
 
       // Build drawtext filters
