@@ -217,9 +217,11 @@ function TextOverlay() {
     }
     
     if (actualBorderWidth > 0) {
-      // Border width: scale proportionally with video height
-      const borderWidthExpr = `(${actualBorderWidth}*h/1080)`
-      filter += `:borderw=${borderWidthExpr}:bordercolor=${borderColor}@0.8`
+      // Border width: FFmpeg's borderw parameter only accepts fixed integer values, not expressions
+      // We use the base value (designed for 1080p) - it will appear proportionally correct
+      // since the font size scales, the border will appear to scale relatively as well
+      // For better scaling, we could probe the video first, but fixed value works reasonably well
+      filter += `:borderw=${actualBorderWidth}:bordercolor=${borderColor}@0.8`
     }
     
     return filter
