@@ -395,15 +395,29 @@ function TextOverlay() {
           ])
 
           // Extract middle segment (overlayDuration to endStartTime)
+          // Re-encode with same lossless settings as processed segments for codec compatibility
+          // This allows us to use concat demuxer with streamcopy (lossless)
+          // Note: Still faster than processing entire video since no overlay filter needed
           const middleDuration = (videoDuration - overlayDuration * 2).toFixed(3)
-          setStatus('Extracting middle segment...')
+          setStatus('Encoding middle segment (no overlay, faster)...')
+          ffmpeg.on('progress', ({ progress }) => {
+            if (progress >= 0 && progress <= 1) {
+              const progressPercent = Math.round(20 + (progress * 10)) // 20-30%
+              setProgress(progressPercent)
+            }
+          })
           await ffmpeg.exec([
             '-i', sanitized,
             '-ss', overlayDuration.toString(),
             '-t', middleDuration,
-            '-c', 'copy',
+            '-c:v', 'libx264',
+            '-preset', 'veryslow',
+            '-crf', '0', // Lossless to match processed segments
+            '-c:a', 'copy', // Copy audio (will be streamcopied in final concat)
+            '-pix_fmt', 'yuv420p',
             middleSegment
           ])
+          ffmpeg.off('progress')
 
           setProgress(30)
 
@@ -456,22 +470,23 @@ function TextOverlay() {
           setProgress(70)
           setStatus('Concatenating segments...')
 
-          // Concatenate all three segments using concat filter
-          // All segments must start at timestamp 0 and have compatible codecs
+          // Create concat list file for concat demuxer (allows streamcopy)
+          // All segments now have matching codecs (lossless libx264, same audio)
+          const concatList = `file '${startProcessed}'\nfile '${middleSegment}'\nfile '${endProcessed}'`
+          await ffmpeg.writeFile('concat_list.txt', concatList)
+
+          // Use concat demuxer with streamcopy for lossless quality
+          // This requires all segments to have identical codec parameters
           await ffmpeg.exec([
-            '-i', startProcessed,
-            '-i', middleSegment,
-            '-i', endProcessed,
-            '-filter_complex', '[0:v][0:a][1:v][1:a][2:v][2:a]concat=n=3:v=1:a=1[outv][outa]',
-            '-map', '[outv]',
-            '-map', '[outa]',
-            '-c:v', 'libx264',
-            '-preset', 'veryslow',
-            '-crf', '0',
-            '-c:a', 'copy',
-            '-pix_fmt', 'yuv420p',
+            '-f', 'concat',
+            '-safe', '0',
+            '-i', 'concat_list.txt',
+            '-c', 'copy', // Streamcopy for both video and audio (lossless)
             outputFilename
           ])
+
+          // Clean up concat list
+          await ffmpeg.deleteFile('concat_list.txt').catch(() => {})
 
           setProgress(90)
 
