@@ -110,9 +110,9 @@ function TextOverlay() {
       return
     }
 
-    const maxSize = 500 * 1024 * 1024 // 500MB
+    const maxSize = 2 * 1024 * 1024 * 1024 // 2GB
     if (selectedFile.size > maxSize) {
-      setError('File size too large. Maximum size is 500MB for browser processing.')
+      setError('File size too large. Maximum size is 2GB for browser processing.')
       if (fileInputRef.current) {
         fileInputRef.current.value = ''
       }
@@ -239,7 +239,8 @@ function TextOverlay() {
     setIsProcessing(true)
     setError('')
     setProgress(0)
-    setStatus('Processing... This may take a while for large files.')
+    const fileSizeMB = (file.size / (1024 * 1024)).toFixed(2)
+    setStatus(`Processing ${fileSizeMB}MB file... This may take a while. Note: Output file may be larger due to lossless encoding.`)
 
     try {
       const sanitized = sanitizeFilename(file.name)
