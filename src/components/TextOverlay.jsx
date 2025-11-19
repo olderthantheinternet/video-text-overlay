@@ -200,10 +200,14 @@ function TextOverlay() {
     // Enable overlay only at start (0 to overlayDuration seconds) and end (duration-overlayDuration to duration)
     // This shows the overlay for the first few seconds and last few seconds of the video
     // FFmpeg expression: show when t is between 0 and overlayDuration OR between (duration-overlayDuration) and duration
-    // For very short videos (less than 2*overlayDuration), show for the entire duration
-    const enableExpr = `if(lt(duration,${overlayDuration * 2}),1,between(t,0,${overlayDuration})+between(t,duration-${overlayDuration},duration))`
+    // Note: Using proper escaping - commas in expressions need to be escaped as \, in the filter string
+    const enableExpr = `between(t,0,${overlayDuration})+between(t,duration-${overlayDuration},duration)`
     
-    let filter = `drawtext=text='${escapedText}':fontsize=${fontSizeExpr}:x=${xExpr}:y=${yExpr}:fontcolor=${fontColor}@1.0:enable='${enableExpr}'`
+    // Escape the enable expression properly for FFmpeg filter syntax
+    // In FFmpeg filter strings, we need to escape special characters
+    const escapedEnableExpr = enableExpr.replace(/,/g, '\\,')
+    
+    let filter = `drawtext=text='${escapedText}':fontsize=${fontSizeExpr}:x=${xExpr}:y=${yExpr}:fontcolor=${fontColor}@1.0:enable='${escapedEnableExpr}'`
     
     // Add border for visibility
     if (borderWidth > 0) {
@@ -308,6 +312,9 @@ function TextOverlay() {
       // Actually, for multiple drawtext filters, we can just comma-separate them
       // FFmpeg will apply them sequentially
       const finalFilter = filters.join(',')
+      
+      // Debug: log the filter to console
+      console.log('FFmpeg filter:', finalFilter)
 
       setProgress(30)
       setStatus('Rendering video with text overlay...')
@@ -318,6 +325,17 @@ function TextOverlay() {
       // Using lossless encoding: CRF 0 for lossless H.264, veryslow preset for best compression
       // Audio is copied without re-encoding (already lossless)
       try {
+        setProgress(40)
+        setStatus('Running FFmpeg... This may take several minutes for large files.')
+        
+        // Add progress callback
+        ffmpeg.on('progress', ({ progress }) => {
+          if (progress >= 0 && progress <= 1) {
+            const progressPercent = Math.round(40 + (progress * 50)) // 40-90%
+            setProgress(progressPercent)
+          }
+        })
+
         await ffmpeg.exec([
           '-i', sanitized,
           '-vf', finalFilter,
@@ -328,16 +346,43 @@ function TextOverlay() {
           '-pix_fmt', 'yuv420p', // Ensure compatibility
           outputFilename
         ])
+
+        // Remove progress callback
+        ffmpeg.off('progress')
       } catch (execErr) {
         const execErrorMessage = execErr?.message || execErr?.toString() || String(execErr) || 'FFmpeg execution failed'
+        console.error('FFmpeg error details:', execErr)
         throw new Error(`FFmpeg processing failed: ${execErrorMessage}`)
       }
 
       setProgress(90)
       setStatus('Finalizing output...')
 
+      // Verify output file exists and has content
+      try {
+        const files = await ffmpeg.listDir('/')
+        const outputFile = files.find(f => f.name === outputFilename)
+        if (!outputFile) {
+          throw new Error(`Output file ${outputFilename} was not created by FFmpeg`)
+        }
+        if (outputFile.size === 0) {
+          throw new Error(`Output file ${outputFilename} is empty. FFmpeg may have failed silently.`)
+        }
+        console.log(`Output file created: ${outputFilename}, size: ${outputFile.size} bytes`)
+      } catch (listErr) {
+        console.error('Error checking output file:', listErr)
+        throw new Error(`Failed to verify output file: ${listErr.message}`)
+      }
+
       // Read output file
       const outputData = await ffmpeg.readFile(outputFilename)
+      
+      if (!outputData || outputData.length === 0) {
+        throw new Error('Output file is empty. Processing may have failed.')
+      }
+
+      console.log(`Output file size: ${outputData.length} bytes`)
+      
       const blob = new Blob([outputData], { type: `video/${ext === 'mov' ? 'quicktime' : 'mp4'}` })
       const url = URL.createObjectURL(blob)
       
