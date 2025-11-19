@@ -252,7 +252,7 @@ function TextOverlay() {
     setError('')
     setProgress(0)
     const fileSizeMB = (file.size / (1024 * 1024)).toFixed(2)
-    setStatus(`Processing ${fileSizeMB}MB file... This may take a while. Note: Output file may be larger due to lossless encoding.`)
+    setStatus(`Processing ${fileSizeMB}MB file... Using high-quality encoding (CRF 18) for fast processing.`)
 
     try {
       const sanitized = sanitizeFilename(file.name)
@@ -395,8 +395,8 @@ function TextOverlay() {
           ])
 
           // Extract middle segment (overlayDuration to endStartTime)
-          // Re-encode with same lossless settings as processed segments for codec compatibility
-          // This allows us to use concat demuxer with streamcopy (lossless)
+          // Re-encode with same settings as processed segments for codec compatibility
+          // This allows us to use concat demuxer with streamcopy
           // Note: Still faster than processing entire video since no overlay filter needed
           const middleDuration = (videoDuration - overlayDuration * 2).toFixed(3)
           setStatus('Encoding middle segment (no overlay, faster)...')
@@ -411,8 +411,8 @@ function TextOverlay() {
             '-ss', overlayDuration.toString(),
             '-t', middleDuration,
             '-c:v', 'libx264',
-            '-preset', 'veryslow',
-            '-crf', '0', // Lossless to match processed segments
+            '-preset', 'medium',
+            '-crf', '18', // Visually lossless, much faster than CRF 0
             '-c:a', 'copy', // Copy audio (will be streamcopied in final concat)
             '-pix_fmt', 'yuv420p',
             middleSegment
@@ -435,8 +435,8 @@ function TextOverlay() {
             '-vf', finalFilter,
             '-c:a', 'copy',
             '-c:v', 'libx264',
-            '-preset', 'veryslow',
-            '-crf', '0',
+            '-preset', 'medium',
+            '-crf', '18', // Visually lossless, much faster than CRF 0
             '-pix_fmt', 'yuv420p',
             startProcessed
           ])
@@ -459,8 +459,8 @@ function TextOverlay() {
             '-vf', finalFilter,
             '-c:a', 'copy',
             '-c:v', 'libx264',
-            '-preset', 'veryslow',
-            '-crf', '0',
+            '-preset', 'medium',
+            '-crf', '18', // Visually lossless, much faster than CRF 0
             '-pix_fmt', 'yuv420p',
             endProcessed
           ])
@@ -471,11 +471,11 @@ function TextOverlay() {
           setStatus('Concatenating segments...')
 
           // Create concat list file for concat demuxer (allows streamcopy)
-          // All segments now have matching codecs (lossless libx264, same audio)
+          // All segments now have matching codecs (libx264 CRF 18, same audio)
           const concatList = `file '${startProcessed}'\nfile '${middleSegment}'\nfile '${endProcessed}'`
           await ffmpeg.writeFile('concat_list.txt', concatList)
 
-          // Use concat demuxer with streamcopy for lossless quality
+          // Use concat demuxer with streamcopy for fast concatenation
           // This requires all segments to have identical codec parameters
           await ffmpeg.exec([
             '-f', 'concat',
@@ -519,8 +519,8 @@ function TextOverlay() {
           '-vf', finalFilter,
           '-c:a', 'copy',
           '-c:v', 'libx264',
-          '-preset', 'veryslow',
-          '-crf', '0',
+          '-preset', 'medium',
+          '-crf', '18', // Visually lossless, much faster than CRF 0
           '-pix_fmt', 'yuv420p',
           outputFilename
         ])
