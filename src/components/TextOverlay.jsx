@@ -284,29 +284,6 @@ function TextOverlay() {
         // If not, the error will be clear
       }
 
-      setProgress(15)
-      setStatus('Getting video duration...')
-      
-      // Probe video to get duration - duration variable may not be available in drawtext expressions
-      let videoDuration = null
-      try {
-        // Use ffprobe to get video duration
-        const probeOutput = await ffmpeg.exec([
-          '-i', sanitized,
-          '-show_entries', 'format=duration',
-          '-of', 'default=noprint_wrappers=1:nokey=1',
-          '-v', 'error'
-        ])
-        // Note: ffprobe output goes to stderr in some FFmpeg.wasm versions
-        // We'll need to parse the log output or use a different method
-        // For now, let's try a simpler approach: use a very large end time
-        // Or we can parse duration from the log messages
-        videoDuration = null // Will be set from log parsing if needed
-      } catch (probeErr) {
-        console.warn('Could not probe video duration:', probeErr)
-        // Continue without duration - we'll use a workaround
-      }
-
       setProgress(20)
       setStatus('Applying text overlay...')
 
@@ -345,11 +322,11 @@ function TextOverlay() {
       const fontPath = 'font.ttf' // Font file path in FFmpeg virtual filesystem
       const filters = []
       if (songTitle.trim()) {
-        const titleFilter = buildDrawTextFilter(songTitle, scaledConfig.songTitle, true, 4, fontPath, videoDuration)
+        const titleFilter = buildDrawTextFilter(songTitle, scaledConfig.songTitle, true, 4, fontPath, null)
         if (titleFilter) filters.push(titleFilter)
       }
       if (artist.trim()) {
-        const artistFilter = buildDrawTextFilter(artist, scaledConfig.artist, false, 4, fontPath, videoDuration)
+        const artistFilter = buildDrawTextFilter(artist, scaledConfig.artist, false, 4, fontPath, null)
         if (artistFilter) filters.push(artistFilter)
       }
 
