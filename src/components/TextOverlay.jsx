@@ -171,7 +171,8 @@ function TextOverlay() {
   }
 
   // Build FFmpeg drawtext filter
-  const buildDrawTextFilter = (text, config, isTitle, overlayDuration = 4) => {
+  // fontPath: path to font file in FFmpeg virtual filesystem
+  const buildDrawTextFilter = (text, config, isTitle, overlayDuration = 4, fontPath = 'font.ttf') => {
     if (!text) return ''
     
     const escapedText = escapeText(text)
@@ -207,7 +208,9 @@ function TextOverlay() {
     // In FFmpeg filter strings, we need to escape special characters
     const escapedEnableExpr = enableExpr.replace(/,/g, '\\,')
     
-    let filter = `drawtext=text='${escapedText}':fontsize=${fontSizeExpr}:x=${xExpr}:y=${yExpr}:fontcolor=${fontColor}@1.0:enable='${escapedEnableExpr}'`
+    // FFmpeg drawtext requires fontfile parameter
+    // We'll pass the font path as a parameter to this function
+    let filter = `drawtext=fontfile=font.ttf:text='${escapedText}':fontsize=${fontSizeExpr}:x=${xExpr}:y=${yExpr}:fontcolor=${fontColor}@1.0:enable='${escapedEnableExpr}'`
     
     // Add border for visibility
     // Determine border width: use config borderWidth if > 0, or 2 for bold text if borderWidth is 0
@@ -259,6 +262,26 @@ function TextOverlay() {
       await ffmpeg.writeFile(sanitized, new Uint8Array(fileData))
       setProgress(10)
 
+      // FFmpeg drawtext requires a font file
+      // Load a font into FFmpeg virtual filesystem
+      setStatus('Loading font file...')
+      try {
+        // Try loading a common font from CDN
+        const fontResponse = await fetch('https://fonts.gstatic.com/s/roboto/v30/KFOmCnqEu92Fr1Mu4mxP.ttf')
+        if (fontResponse.ok) {
+          const fontData = await fontResponse.arrayBuffer()
+          await ffmpeg.writeFile('font.ttf', new Uint8Array(fontData))
+          console.log('Font file loaded successfully')
+        } else {
+          throw new Error('Could not load font from CDN')
+        }
+      } catch (fontErr) {
+        console.warn('Font loading error:', fontErr)
+        // Try alternative: use a data URL or embedded font
+        // For now, we'll proceed and see if FFmpeg has a default font
+        // If not, the error will be clear
+      }
+
       setProgress(20)
       setStatus('Applying text overlay...')
 
@@ -294,13 +317,14 @@ function TextOverlay() {
 
       // Build drawtext filters
       // Note: Values scale proportionally with video height (h/1080) so text appears the same visual size on all resolutions
+      const fontPath = 'font.ttf' // Font file path in FFmpeg virtual filesystem
       const filters = []
       if (songTitle.trim()) {
-        const titleFilter = buildDrawTextFilter(songTitle, scaledConfig.songTitle, true)
+        const titleFilter = buildDrawTextFilter(songTitle, scaledConfig.songTitle, true, 4, fontPath)
         if (titleFilter) filters.push(titleFilter)
       }
       if (artist.trim()) {
-        const artistFilter = buildDrawTextFilter(artist, scaledConfig.artist, false)
+        const artistFilter = buildDrawTextFilter(artist, scaledConfig.artist, false, 4, fontPath)
         if (artistFilter) filters.push(artistFilter)
       }
 
