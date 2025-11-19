@@ -37,10 +37,12 @@ A browser-based tool for adding overlay text to MP4 and MOV video files using FF
 ## Technical Details
 
 - Built with React and Vite
-- Uses FFmpeg.wasm for video processing
+- Uses FFmpeg.wasm (multi-threaded) for video processing - automatically falls back to single-threaded if SharedArrayBuffer is unavailable
 - Text positioning uses FFmpeg expressions that scale automatically with video resolution
 - White text with black border for maximum visibility
 - Audio is copied without re-encoding for faster processing
+- **Performance**: Uses split-process-stitch approach - only processes start and end segments with overlays, significantly faster than processing entire video
+- **Multi-threading**: Requires `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp` headers for SharedArrayBuffer support. If headers are not configured, automatically falls back to single-threaded mode.
 
 ## Development
 
